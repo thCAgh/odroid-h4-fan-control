@@ -71,7 +71,7 @@ calculate_pwm() {
             echo ${pwm_value%.*}
             ;;
         *)
-            echo "Unknown PWM calculation method: $PWM_METHOD"
+            log_error "Unknown PWM calculation method: $PWM_METHOD"
             exit 1
             ;;
     esac
