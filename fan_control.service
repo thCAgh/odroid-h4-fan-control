@@ -1,0 +1,11 @@
+[Unit]
+Description=Fan Control Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/ionice -c2 -n7 /usr/bin/nice -n19 /root/fan_control.sh -c exp
+Restart=always
+#User=USERNAME
+
+[Install]
+WantedBy=multi-user.target
