@@ -39,8 +39,8 @@ This repository contains a script to control the fan of an ODROID H4. The script
 
 4. **Create a systemd service to run the script at boot:**
 
-   Create the service file:
-   ```ini name=/etc/systemd/system/fan_control.service
+   Create the service file `/etc/systemd/system/fan_control.service`:
+   ```
    [Unit]
    Description=Fan Control Service
    After=network.target
