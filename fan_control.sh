@@ -168,7 +168,7 @@ while true; do
     cpuTemp=${cpuTemp:0:2}  # Extract the first two digits of the temperature
 
     # Check for broken fan
-    if [ "$fanSpeed" -ne 0 ] && [ "$fanRpm" -eq 0 ]; then
+    if [ "$fanSpeed" -ge $MIN_PWM ] && [ "$fanRpm" -eq 0 ]; then
         log_error "Error: Fan is broken. PWM is $fanSpeed but RPM is 0."
         exit 1
     fi
