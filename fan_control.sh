@@ -10,6 +10,8 @@ NVME_HIGH_TEMP=60      # High temperature threshold for NVMe
 MIN_PWM=70             # Minimum PWM value
 MAX_PWM=255            # Maximum PWM value
 OVERHEAT_THRESHOLD=10  # Temperature threshold above high temp for overheating protection
+FAN_FAIL_COUNT=2       # How many fan failures need to be detected to exit the script and avoid false positives at low level speeds in cheap fans
+
 
 # Command line controlled variables
 SLEEP_DURATION=5       # Default sleep duration between checks
@@ -124,6 +126,7 @@ log "Current user: $(whoami)"
 log "Sleep duration: ${SLEEP_DURATION} seconds"
 log "Overheating protection enabled: $OVERHEAT_PROTECTION"
 log "PWM calculation method: $PWM_METHOD"
+log_error "Info: Started with sleep ${SLEEP_DURATION}, overheating protection enabled $OVERHEAT_PROTECTION, PWM method $PWM_METHOD, Fan failure count $FAN_FAIL_COUNT"
 
 # Check if the script is run as root, otherwise re-run with sudo
 [ "$EUID" -eq 0 ] || exec sudo "$0" "$@"
@@ -159,6 +162,8 @@ if [ ! -e "$fanSpeedDir" ] || [ ! -e "$fanRpmDir" ] || [ ! -e "$cpuTempDir" ]; t
     exit 1
 fi
 
+fanFailCount=0
+
 # Infinite loop to monitor and control fan speed based on the highest temperature
 while true; do
     # Read the current fan speed, fan RPM, and CPU temperature
@@ -167,10 +172,17 @@ while true; do
     cpuTemp=$(<"$cpuTempDir")
     cpuTemp=${cpuTemp:0:2}  # Extract the first two digits of the temperature
 
-    # Check for broken fan
+    # Check for broken fan, detect FAN_FAIL_COUNT failures in a row 
     if [ "$fanSpeed" -ge $MIN_PWM ] && [ "$fanRpm" -eq 0 ]; then
-        log_error "Error: Fan is broken. PWM is $fanSpeed but RPM is 0."
-        exit 1
+        if [ "$fanFailCount" -ge $FAIL_COUNT_MAX ]; then
+            log_error "Error: Fan is broken. PWM is $fanSpeed but RPM is 0. Failure detected $fanFailCount times"
+            exit 1
+        else
+           fanFailCount+=1
+           log_error "Warning: Fan issue. PWM is $fanSpeed but RPM is 0. fanFailCount increased to $fanFailCount"
+        fi
+    else
+        fanFailCount=0  # reset fail counter
     fi
 
     # Overheating protection check for CPU
