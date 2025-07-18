@@ -2,19 +2,20 @@
 
 # User-defined temperature and PWM variables
 CPU_LOW_TEMP=40        # Low temperature threshold for CPU
-CPU_HIGH_TEMP=80       # High temperature threshold for CPU
+CPU_HIGH_TEMP=75       # High temperature threshold for CPU
 DRIVE_LOW_TEMP=25      # Low temperature threshold for Drives
 DRIVE_HIGH_TEMP=45     # Low temperature threshold for Drives
 NVME_LOW_TEMP=35       # Low temperature threshold for NVMe
-NVME_HIGH_TEMP=60      # High temperature threshold for NVMe
-MIN_PWM=70             # Minimum PWM value
+NVME_HIGH_TEMP=55      # High temperature threshold for NVMe
+FAN_POWERSAVE_PWM=0    # Minumum PWM to keep (or not) the fan spining when temperature is lower than all the mins. 0 means fan will stop when all is cool enough.
+MIN_PWM=60             # Minimum PWM value
 MAX_PWM=255            # Maximum PWM value
 OVERHEAT_THRESHOLD=10  # Temperature threshold above high temp for overheating protection
-FAN_FAIL_COUNT=2       # How many fan failures need to be detected to exit the script and avoid false positives at low level speeds in cheap fans
+FAN_FAIL_MAX_COUNT=2    # How many fan failures need to be detected to exit the script and avoid false positives at low level speeds in cheap fans
 
 
 # Command line controlled variables
-SLEEP_DURATION=5       # Default sleep duration between checks
+SLEEP_DURATION=10       # Default sleep duration between checks
 OVERHEAT_PROTECTION=false  # Enable or disable overheating protection
 VERBOSE=false          # Verbose flag
 PWM_METHOD="lin"       # Default PWM calculation method
@@ -45,7 +46,7 @@ calculate_pwm() {
     local high_temp=$3
 
     if [ "$temp" -lt "$low_temp" ]; then
-        echo 0  # Turn off the fan if the temperature is below the low threshold
+        echo $FAN_POWERSAVE_PWM  # Turn off or set to powersave the fan if the temperature is below the low threshold
         return
     elif [ "$temp" -ge "$high_temp" ]; then
         echo $MAX_PWM
@@ -126,7 +127,7 @@ log "Current user: $(whoami)"
 log "Sleep duration: ${SLEEP_DURATION} seconds"
 log "Overheating protection enabled: $OVERHEAT_PROTECTION"
 log "PWM calculation method: $PWM_METHOD"
-log_error "Info: Started with sleep ${SLEEP_DURATION}, overheating protection enabled $OVERHEAT_PROTECTION, PWM method $PWM_METHOD, Fan failure count $FAN_FAIL_COUNT"
+log_error "Info: Started with sleep ${SLEEP_DURATION}, overheating protection enabled $OVERHEAT_PROTECTION, PWM method $PWM_METHOD, Fan failure count $FAN_FAIL_MAX_COUNT"
 
 # Check if the script is run as root, otherwise re-run with sudo
 [ "$EUID" -eq 0 ] || exec sudo "$0" "$@"
@@ -139,6 +140,10 @@ fanSpeedDir=$(echo /sys/class/hwmon/$(ls -l /sys/class/hwmon | grep it87 | awk '
 fanRpmDir=$(echo /sys/class/hwmon/$(ls -l /sys/class/hwmon | grep it87 | awk '{print $9}')/fan2_input)
 # Get the CPU temperature directory
 cpuTempDir=$(echo /sys/class/hwmon/$(ls -l /sys/class/hwmon | grep coretemp | awk '{print $9}')/temp1_input)
+
+log "using fanSpeedDir= $fanSpeedDir"
+log "using fanRpmDir= $fanRpmDir"
+log "using cpuTempDir= $cpuTempDir"
 
 # Function to dynamically find hwmon entries for drivetemp and nvme
 get_hwmon_dirs() {
@@ -173,16 +178,19 @@ while true; do
     cpuTemp=${cpuTemp:0:2}  # Extract the first two digits of the temperature
 
     # Check for broken fan, detect FAN_FAIL_COUNT failures in a row 
-    if [ "$fanSpeed" -ge $MIN_PWM ] && [ "$fanRpm" -eq 0 ]; then
-        if [ "$fanFailCount" -ge $FAIL_COUNT_MAX ]; then
-            log_error "Error: Fan is broken. PWM is $fanSpeed but RPM is 0. Failure detected $fanFailCount times"
+    if [ "$fanSpeed" -gt 0 ] && [ "$fanRpm" -eq 0 ]; then
+	if [ "$fanFailCount" -ge $FAN_FAIL_MAX_COUNT ]; then
+	    log_error "Error: Fan is broken. PWM is $fanSpeed but RPM is 0. Failure detected $fanFailCount times"
             exit 1
-        else
-           fanFailCount+=1
-           log_error "Warning: Fan issue. PWM is $fanSpeed but RPM is 0. fanFailCount increased to $fanFailCount"
-        fi
+	else
+	   ((fanFailCount++))
+	   log_error "Warning: Fan issue. PWM is $fanSpeed but RPM is 0. fanFailCount increased to $fanFailCount"
+	fi
     else
-        fanFailCount=0  # reset fail counter
+	if [ "$fanFailCount" -gt 0 ]; then
+	  log_error "Info: fanFailCount ($fanFailCount) reset"
+	fi
+	fanFailCount=0  # reset fail counter
     fi
 
     # Overheating protection check for CPU
@@ -230,13 +238,15 @@ while true; do
     log "Max CPU Temp(Celsius): $maxCPU"
     log "Max Drive Temp(Celsius): $maxDrive"
     log "Max NVMe Temp(Celsius): $maxNVMe"
-    log "fanSpeed PWM value: $fanSpeed"
-    log "fan RPM: $fanRpm"
+    log "Previous Fan PWM: $fanSpeed"
+    log "Previous Fan RPM: $fanRpm"
+    log "Fan failures count $fanFailCount/$FAN_FAIL_MAX_COUNT"
 
     # Calculate PWM values for CPU, Drive, and NVMe temperatures
     pwmCPU=$(calculate_pwm "$maxCPU" "$CPU_LOW_TEMP" "$CPU_HIGH_TEMP")
     pwmDrive=$(calculate_pwm "$maxDrive" "$DRIVE_LOW_TEMP" "$DRIVE_HIGH_TEMP")
     pwmNVMe=$(calculate_pwm "$maxNVMe" "$NVME_LOW_TEMP" "$NVME_HIGH_TEMP")
+    log  "cpu: $pwmCPU, drive: $pwmDrive, NVMe: $pwmNVMe"
 
     # Determine the highest PWM value
     if [ "$pwmCPU" -ge "$pwmDrive" ] && [ "$pwmCPU" -ge "$pwmNVMe" ]; then
